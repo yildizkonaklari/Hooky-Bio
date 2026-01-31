@@ -3,8 +3,8 @@
 // AI-Powered Bio Generation with Freemium
 // ========================================
 
-// Config
-const API_ENDPOINT = '/.netlify/functions/generate';
+// Config - API endpoint (works with both Vercel and Netlify)
+const API_ENDPOINT = '/api/generate';
 const FREE_DAILY_LIMIT = 3;
 const STORAGE_KEYS = {
     usage: 'hooky_bio_usage',

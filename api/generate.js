@@ -1,5 +1,5 @@
-// Netlify serverless function for Hooky Bio
-// Uses OpenAI API to generate bios
+// Vercel serverless function for Hooky Bio
+// File: api/generate.js
 
 const SYSTEM_PROMPT = `You are Hooky Bio.
 
@@ -117,38 +117,25 @@ Before finalizing:
 
 If not, rewrite internally until it feels clean and human.`;
 
-exports.handler = async (event) => {
-    // CORS headers
-    const headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+export default async function handler(req, res) {
+    // CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Handle preflight request
-    if (event.httpMethod === 'OPTIONS') {
-        return { statusCode: 200, headers, body: '' };
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
 
-    if (event.httpMethod !== 'POST') {
-        return {
-            statusCode: 405,
-            headers,
-            body: JSON.stringify({ error: 'Method not allowed' })
-        };
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed' });
     }
 
     try {
-        const { platform, niche, audience, goal, style, outputType } = JSON.parse(event.body);
+        const { platform, niche, audience, goal, style, outputType } = req.body;
 
-        // Validate required fields
         if (!platform || !niche || !audience || !goal || !style || !outputType) {
-            return {
-                statusCode: 400,
-                headers,
-                body: JSON.stringify({ error: 'Missing required fields' })
-            };
+            return res.status(400).json({ error: 'Missing required fields' });
         }
 
         const userPrompt = `Platform: ${platform}
@@ -176,33 +163,19 @@ Output_Type: ${outputType}`;
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            console.error('OpenAI API error:', errorData);
-            return {
-                statusCode: response.status,
-                headers,
-                body: JSON.stringify({ error: 'Failed to generate content' })
-            };
+            return res.status(response.status).json({ error: 'Failed to generate content' });
         }
 
         const data = await response.json();
         const generatedContent = data.choices[0].message.content.trim();
 
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({
-                content: generatedContent,
-                outputType: outputType
-            })
-        };
+        return res.status(200).json({
+            content: generatedContent,
+            outputType: outputType
+        });
 
     } catch (error) {
         console.error('Function error:', error);
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ error: 'Internal server error' })
-        };
+        return res.status(500).json({ error: 'Internal server error' });
     }
-};
+}
