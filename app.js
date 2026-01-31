@@ -1,302 +1,273 @@
 // ========================================
-// HOOKY BIO GENERATOR - APP.JS
+// HOOKY BIO - APP.JS
+// AI-Powered Bio Generation with Freemium
 // ========================================
 
+// Config
+const API_ENDPOINT = '/.netlify/functions/generate';
+const FREE_DAILY_LIMIT = 3;
+const STORAGE_KEYS = {
+    usage: 'hooky_bio_usage',
+    isPro: 'hooky_bio_pro',
+    firstBioDate: 'hooky_bio_first'
+};
+
+// PRO-only features
+const PRO_FEATURES = {
+    output: ['Hook', 'CTA', 'Variations', 'All'],
+    style: ['Expressive']
+};
+
 // DOM Elements
-const platformGroup = document.getElementById('platformGroup');
-const goalGroup = document.getElementById('goalGroup');
-const styleGroup = document.getElementById('styleGroup');
-const outputGroup = document.getElementById('outputGroup');
 const nicheInput = document.getElementById('nicheInput');
 const audienceInput = document.getElementById('audienceInput');
 const generateBtn = document.getElementById('generateBtn');
 const resultsSection = document.getElementById('resultsSection');
 const resultsContainer = document.getElementById('resultsContainer');
 const copyAllBtn = document.getElementById('copyAllBtn');
+const proBadge = document.getElementById('proBadge');
+const upgradeHint = document.getElementById('upgradeHint');
+const softReminder = document.getElementById('softReminder');
+const reminderLink = document.getElementById('reminderLink');
+const paywallOverlay = document.getElementById('paywallOverlay');
+const paywallClose = document.getElementById('paywallClose');
+const paywallTitle = document.getElementById('paywallTitle');
+const paywallSubtitle = document.getElementById('paywallSubtitle');
+const paywallNote = document.getElementById('paywallNote');
+const paywallCta = document.getElementById('paywallCta');
 
-// State
-let currentState = {
-    platform: 'Instagram',
-    niche: '',
-    audience: '',
-    goal: 'Followers',
-    style: 'Balanced',
-    output: 'Bio'
-};
+// Exit early if not on main page
+if (!generateBtn) {
+    console.log('Hooky Bio: Elements not found');
+} else {
 
-// ========================================
-// CHIP GROUP HANDLING
-// ========================================
-function setupChipGroup(group, stateKey) {
-    const chips = group.querySelectorAll('.chip');
-    chips.forEach(chip => {
+    // ========================================
+    // STATE MANAGEMENT
+    // ========================================
+    let currentState = {
+        platform: 'Instagram',
+        niche: '',
+        audience: '',
+        goal: 'Followers',
+        style: 'Balanced',
+        output: 'Bio'
+    };
+
+    // ========================================
+    // USAGE & PRO STATUS
+    // ========================================
+    function getTodayKey() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    function getUsageData() {
+        try {
+            const data = JSON.parse(localStorage.getItem(STORAGE_KEYS.usage) || '{}');
+            const today = getTodayKey();
+            if (data.date !== today) {
+                return { date: today, count: 0, totalBios: data.totalBios || 0 };
+            }
+            return data;
+        } catch {
+            return { date: getTodayKey(), count: 0, totalBios: 0 };
+        }
+    }
+
+    function incrementUsage() {
+        const data = getUsageData();
+        data.count++;
+        data.totalBios = (data.totalBios || 0) + 1;
+        localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify(data));
+        return data;
+    }
+
+    function getRemainingFreeUses() {
+        const data = getUsageData();
+        return Math.max(0, FREE_DAILY_LIMIT - data.count);
+    }
+
+    function isPro() {
+        return localStorage.getItem(STORAGE_KEYS.isPro) === 'true';
+    }
+
+    function isFirstBio() {
+        return !localStorage.getItem(STORAGE_KEYS.firstBioDate);
+    }
+
+    function markFirstBioComplete() {
+        localStorage.setItem(STORAGE_KEYS.firstBioDate, getTodayKey());
+    }
+
+    // ========================================
+    // PAYWALL LOGIC
+    // ========================================
+    function showPaywall(type = 'default') {
+        const messages = {
+            'pro-feature': {
+                title: 'This feature is PRO only',
+                subtitle: 'Unlock hook lines, CTAs, and bio variations.',
+                note: 'Cancel anytime'
+            },
+            'limit-reached': {
+                title: "You've reached today's limit",
+                subtitle: 'Go PRO for unlimited bio creation.',
+                note: 'Or try again tomorrow'
+            },
+            'default': {
+                title: 'Unlock PRO Bios',
+                subtitle: 'Turn profile visitors into followers.',
+                note: 'Cancel anytime'
+            }
+        };
+
+        const msg = messages[type] || messages.default;
+        paywallTitle.textContent = msg.title;
+        paywallSubtitle.textContent = msg.subtitle;
+        paywallNote.textContent = msg.note;
+
+        paywallOverlay.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function hidePaywall() {
+        paywallOverlay.classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    function isProFeature(group, value) {
+        return PRO_FEATURES[group]?.includes(value);
+    }
+
+    // ========================================
+    // CHIP GROUP HANDLING
+    // ========================================
+    document.querySelectorAll('.chip').forEach(chip => {
         chip.addEventListener('click', () => {
-            chips.forEach(c => c.classList.remove('active'));
+            const group = chip.dataset.group;
+            const value = chip.dataset.value;
+            const isProOnly = chip.dataset.pro === 'true';
+
+            // Check if PRO feature and user is not PRO
+            if (isProOnly && !isPro()) {
+                showPaywall('pro-feature');
+                return;
+            }
+
+            // Remove active from siblings
+            document.querySelectorAll(`.chip[data-group="${group}"]`).forEach(c => {
+                c.classList.remove('active');
+            });
+
+            // Add active to clicked
             chip.classList.add('active');
-            currentState[stateKey] = chip.dataset.value;
+
+            // Update state
+            currentState[group] = value;
         });
     });
-}
 
-setupChipGroup(platformGroup, 'platform');
-setupChipGroup(goalGroup, 'goal');
-setupChipGroup(styleGroup, 'style');
-setupChipGroup(outputGroup, 'output');
-
-// ========================================
-// BIO GENERATION LOGIC
-// ========================================
-
-// Platform-specific templates and rules
-const platformRules = {
-    Instagram: { maxLength: 150, tone: 'casual', lineBreaks: true },
-    TikTok: { maxLength: 80, tone: 'casual', lineBreaks: true },
-    YouTube: { maxLength: 1000, tone: 'professional', lineBreaks: true },
-    X: { maxLength: 160, tone: 'sharp', lineBreaks: false },
-    LinkedIn: { maxLength: 300, tone: 'professional', lineBreaks: true }
-};
-
-// Hook line generators by niche pattern
-function generateHookLine(niche, audience, goal, platform) {
-    const nicheLC = niche.toLowerCase();
-    const audienceLC = audience.toLowerCase();
-    
-    // Fitness
-    if (nicheLC.includes('fitness') || nicheLC.includes('gym') || nicheLC.includes('workout')) {
-        const hooks = [
-            `Helping ${audience} build strength that lasts`,
-            `${audience} deserve real fitness results`,
-            `Training ${audience} to move better, feel better`
-        ];
-        return hooks[Math.floor(Math.random() * hooks.length)];
-    }
-    
-    // Tech
-    if (nicheLC.includes('tech') || nicheLC.includes('software') || nicheLC.includes('coding')) {
-        const hooks = [
-            `Making ${nicheLC} simple for ${audience}`,
-            `${audience} building better tech`,
-            `Turning complex ${nicheLC} into clear wins`
-        ];
-        return hooks[Math.floor(Math.random() * hooks.length)];
-    }
-    
-    // Business/Marketing
-    if (nicheLC.includes('business') || nicheLC.includes('marketing') || nicheLC.includes('sales')) {
-        const hooks = [
-            `Helping ${audience} grow with clarity`,
-            `${audience} deserve better ${nicheLC} results`,
-            `Building businesses that actually work`
-        ];
-        return hooks[Math.floor(Math.random() * hooks.length)];
-    }
-    
-    // Fashion/Beauty
-    if (nicheLC.includes('fashion') || nicheLC.includes('beauty') || nicheLC.includes('style')) {
-        const hooks = [
-            `${audience} finding their signature look`,
-            `Style that fits ${audience}`,
-            `Making ${nicheLC} accessible and real`
-        ];
-        return hooks[Math.floor(Math.random() * hooks.length)];
-    }
-    
-    // Content/Creator
-    if (nicheLC.includes('content') || nicheLC.includes('creator') || nicheLC.includes('influence')) {
-        const hooks = [
-            `Helping ${audience} create content that connects`,
-            `${audience} building real audiences`,
-            `Content strategy for ${audience}`
-        ];
-        return hooks[Math.floor(Math.random() * hooks.length)];
-    }
-    
-    // Default generic hooks
-    const genericHooks = [
-        `Helping ${audience} with ${niche}`,
-        `${niche} for ${audience}`,
-        `${audience} deserve better ${niche}`
-    ];
-    return genericHooks[Math.floor(Math.random() * genericHooks.length)];
-}
-
-function generateValueLine(niche, audience, goal, platform) {
-    const goalLines = {
-        Followers: [
-            `Sharing what actually works`,
-            `Real insights, no fluff`,
-            `Follow for practical tips`
-        ],
-        DMs: [
-            `Let's talk strategy`,
-            `Open to connect`,
-            `Building something? Let's chat`
-        ],
-        Sales: [
-            `Products that deliver`,
-            `Solutions that work`,
-            `Results you can measure`
-        ],
-        Authority: [
-            `Years of experience, condensed`,
-            `Trusted by industry leaders`,
-            `Proven track record`
-        ]
-    };
-    
-    const lines = goalLines[goal] || goalLines.Followers;
-    return lines[Math.floor(Math.random() * lines.length)];
-}
-
-function generateCTALine(goal, style) {
-    const ctaLines = {
-        Followers: {
-            Minimal: [`Follow for more`],
-            Balanced: [`New here? Follow along`],
-            Expressive: [`Join the community ✨`]
-        },
-        DMs: {
-            Minimal: [`DM to connect`],
-            Balanced: [`DM 'START' to begin`],
-            Expressive: [`Slide into the DMs 📩`]
-        },
-        Sales: {
-            Minimal: [`Link below`],
-            Balanced: [`Shop link in bio`],
-            Expressive: [`Grab yours below 👇`]
-        },
-        Authority: {
-            Minimal: [`Speaking & consulting`],
-            Balanced: [`Keynote speaker & consultant`],
-            Expressive: [`Book me for your next event 🎤`]
-        }
-    };
-    
-    const goalCTAs = ctaLines[goal] || ctaLines.Followers;
-    const styleCTAs = goalCTAs[style] || goalCTAs.Balanced;
-    return styleCTAs[Math.floor(Math.random() * styleCTAs.length)];
-}
-
-function generateFullBio(platform, niche, audience, goal, style) {
-    const rules = platformRules[platform];
-    const hookLine = generateHookLine(niche, audience, goal, platform);
-    const valueLine = generateValueLine(niche, audience, goal, platform);
-    const ctaLine = generateCTALine(goal, style);
-    
-    if (rules.lineBreaks) {
-        return `${hookLine}\n${valueLine}\n${ctaLine}`;
-    } else {
-        return `${hookLine}. ${valueLine}. ${ctaLine}`;
-    }
-}
-
-function generateVariations(platform, niche, audience, goal, style) {
-    const variations = [];
-    const rules = platformRules[platform];
-    
-    // Variation 1: Direct approach
-    const directHook = `${niche} for ${audience}`;
-    const directValue = goal === 'Authority' ? 'Expert insights daily' : 'Practical tips that work';
-    const directCTA = generateCTALine(goal, style);
-    variations.push(rules.lineBreaks 
-        ? `${directHook}\n${directValue}\n${directCTA}`
-        : `${directHook}. ${directValue}. ${directCTA}`
-    );
-    
-    // Variation 2: Outcome-focused
-    const outcomeHooks = {
-        Followers: `Grow your ${niche} knowledge`,
-        DMs: `Ready to level up your ${niche}?`,
-        Sales: `${niche} products that deliver`,
-        Authority: `${niche} expertise for ${audience}`
-    };
-    const outcomeHook = outcomeHooks[goal];
-    const outcomeValue = `Built for ${audience}`;
-    variations.push(rules.lineBreaks
-        ? `${outcomeHook}\n${outcomeValue}\n${directCTA}`
-        : `${outcomeHook}. ${outcomeValue}. ${directCTA}`
-    );
-    
-    // Variation 3: Story angle
-    const storyHook = `From ${audience}, for ${audience}`;
-    const storyValue = `Sharing everything about ${niche}`;
-    variations.push(rules.lineBreaks
-        ? `${storyHook}\n${storyValue}\n${directCTA}`
-        : `${storyHook}. ${storyValue}. ${directCTA}`
-    );
-    
-    return variations;
-}
-
-function generateContent() {
-    const { platform, niche, audience, goal, style, output } = currentState;
-    
-    const results = {};
-    
-    switch (output) {
-        case 'Hook_Line':
-            results.hook = generateHookLine(niche, audience, goal, platform);
-            break;
-        case 'CTA_Line':
-            results.cta = generateCTALine(goal, style);
-            break;
-        case 'Bio':
-            results.bio = generateFullBio(platform, niche, audience, goal, style);
-            break;
-        case 'Variations':
-            results.variations = generateVariations(platform, niche, audience, goal, style);
-            break;
-        case 'All':
-            results.hook = generateHookLine(niche, audience, goal, platform);
-            results.bio = generateFullBio(platform, niche, audience, goal, style);
-            results.cta = generateCTALine(goal, style);
-            results.variations = generateVariations(platform, niche, audience, goal, style);
-            break;
-    }
-    
-    return results;
-}
-
-// ========================================
-// UI RENDERING
-// ========================================
-function renderResults(results) {
-    resultsContainer.innerHTML = '';
-    
-    if (results.hook) {
-        resultsContainer.appendChild(createResultCard('Hook Line', results.hook));
-    }
-    
-    if (results.bio) {
-        resultsContainer.appendChild(createResultCard('Bio', results.bio));
-    }
-    
-    if (results.cta) {
-        resultsContainer.appendChild(createResultCard('CTA Line', results.cta));
-    }
-    
-    if (results.variations) {
-        const variationsWrapper = document.createElement('div');
-        variationsWrapper.className = 'variations-wrapper';
-        
-        results.variations.forEach((variation, index) => {
-            variationsWrapper.appendChild(createVariationCard(index + 1, variation));
+    // ========================================
+    // API CALL
+    // ========================================
+    async function generateWithAPI(platform, niche, audience, goal, style, outputType) {
+        const response = await fetch(API_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                platform,
+                niche,
+                audience,
+                goal,
+                style,
+                outputType
+            })
         });
-        
-        resultsContainer.appendChild(variationsWrapper);
-    }
-    
-    resultsSection.classList.remove('hidden');
-}
 
-function createResultCard(label, content) {
-    const card = document.createElement('div');
-    card.className = 'result-card';
-    card.innerHTML = `
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate');
+        }
+
+        const data = await response.json();
+        return data;
+    }
+
+    // ========================================
+    // PARSE API RESPONSE
+    // ========================================
+    function parseResponse(content, outputType) {
+        const results = {};
+
+        if (outputType === 'Hook') {
+            results.hook = content.trim();
+        } else if (outputType === 'CTA') {
+            results.cta = content.trim();
+        } else if (outputType === 'Bio') {
+            results.bio = content.trim();
+        } else if (outputType === 'Variations') {
+            const parts = content.split(/\n\n+/).filter(p => p.trim());
+            results.variations = parts.slice(0, 3);
+        } else if (outputType === 'All') {
+            const parts = content.split(/\n\n+/).filter(p => p.trim());
+
+            if (parts.length >= 1) results.hook = parts[0];
+            if (parts.length >= 2) results.bio = parts[1];
+            if (parts.length >= 3) results.cta = parts[2];
+            if (parts.length >= 4) {
+                results.variations = parts.slice(3, 6);
+            }
+        }
+
+        return results;
+    }
+
+    // ========================================
+    // UI RENDERING
+    // ========================================
+    function renderResults(results) {
+        resultsContainer.innerHTML = '';
+
+        if (results.hook) {
+            resultsContainer.appendChild(createResultCard('Hook', results.hook));
+        }
+
+        if (results.bio) {
+            resultsContainer.appendChild(createResultCard('Bio', results.bio));
+        }
+
+        if (results.cta) {
+            resultsContainer.appendChild(createResultCard('CTA', results.cta));
+        }
+
+        if (results.variations && results.variations.length > 0) {
+            const variationsWrapper = document.createElement('div');
+            variationsWrapper.className = 'variations-wrapper';
+
+            results.variations.forEach((variation, index) => {
+                variationsWrapper.appendChild(createVariationCard(index + 1, variation));
+            });
+
+            resultsContainer.appendChild(variationsWrapper);
+        }
+
+        resultsSection.classList.remove('hidden');
+
+        // Show soft reminder for free users after generation
+        if (!isPro()) {
+            softReminder.classList.remove('hidden');
+        }
+    }
+
+    function createResultCard(label, content) {
+        const card = document.createElement('div');
+        card.className = 'result-card';
+        card.innerHTML = `
         <div class="result-label">${label}</div>
         <div class="result-content">${escapeHtml(content)}</div>
         <div class="result-actions">
-            <button class="copy-btn" data-content="${escapeHtml(content)}">
+            <button class="copy-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -305,164 +276,233 @@ function createResultCard(label, content) {
             </button>
         </div>
     `;
-    
-    const copyBtn = card.querySelector('.copy-btn');
-    copyBtn.addEventListener('click', () => copyToClipboard(content, copyBtn));
-    
-    return card;
-}
 
-function createVariationCard(number, content) {
-    const card = document.createElement('div');
-    card.className = 'variation-card';
-    card.innerHTML = `
+        const copyBtn = card.querySelector('.copy-btn');
+        copyBtn.addEventListener('click', () => copyToClipboard(content, copyBtn));
+
+        return card;
+    }
+
+    function createVariationCard(number, content) {
+        const card = document.createElement('div');
+        card.className = 'variation-card';
+        card.innerHTML = `
         <div class="variation-header">
             <span class="variation-number">Variation ${number}</span>
-            <button class="variation-copy-btn" data-content="${escapeHtml(content)}">Copy</button>
+            <button class="variation-copy-btn">Copy</button>
         </div>
         <div class="variation-content">${escapeHtml(content)}</div>
     `;
-    
-    const copyBtn = card.querySelector('.variation-copy-btn');
-    copyBtn.addEventListener('click', () => copyToClipboard(content, copyBtn));
-    
-    return card;
-}
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+        const copyBtn = card.querySelector('.variation-copy-btn');
+        copyBtn.addEventListener('click', () => copyToClipboard(content, copyBtn));
 
-// ========================================
-// CLIPBOARD & TOAST
-// ========================================
-async function copyToClipboard(text, button) {
-    try {
-        await navigator.clipboard.writeText(text);
-        
-        const originalText = button.innerHTML;
-        button.classList.add('copied');
-        button.innerHTML = button.classList.contains('variation-copy-btn') ? 'Copied!' : `
+        return card;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ========================================
+    // CLIPBOARD & TOAST
+    // ========================================
+    async function copyToClipboard(text, button) {
+        try {
+            await navigator.clipboard.writeText(text);
+
+            const originalText = button.innerHTML;
+            button.classList.add('copied');
+            button.innerHTML = button.classList.contains('variation-copy-btn') ? 'Copied!' : `
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
             Copied!
         `;
-        
+
+            setTimeout(() => {
+                button.classList.remove('copied');
+                button.innerHTML = originalText;
+            }, 2000);
+
+            showToast('Copied to clipboard');
+        } catch (err) {
+            showToast('Failed to copy', true);
+        }
+    }
+
+    function copyAllResults() {
+        const allContent = Array.from(resultsContainer.querySelectorAll('.result-content, .variation-content'))
+            .map(el => el.textContent)
+            .join('\n\n---\n\n');
+
+        copyToClipboard(allContent, copyAllBtn);
+    }
+
+    function showToast(message, isError = false) {
+        const existingToast = document.querySelector('.toast');
+        if (existingToast) existingToast.remove();
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${isError ? 'error' : ''}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+
         setTimeout(() => {
-            button.classList.remove('copied');
-            button.innerHTML = originalText;
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
         }, 2000);
-        
-        showToast('Copied to clipboard');
-    } catch (err) {
-        showToast('Failed to copy', true);
     }
-}
 
-function copyAllResults() {
-    const allContent = Array.from(resultsContainer.querySelectorAll('.result-content, .variation-content'))
-        .map(el => el.textContent)
-        .join('\n\n---\n\n');
-    
-    copyToClipboard(allContent, copyAllBtn);
-}
+    // ========================================
+    // VALIDATION
+    // ========================================
+    function validateInputs() {
+        currentState.niche = nicheInput.value.trim();
+        currentState.audience = audienceInput.value.trim();
 
-function showToast(message, isError = false) {
-    // Remove existing toast
-    const existingToast = document.querySelector('.toast');
-    if (existingToast) existingToast.remove();
-    
-    const toast = document.createElement('div');
-    toast.className = `toast ${isError ? 'error' : ''}`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    
-    requestAnimationFrame(() => {
-        toast.classList.add('show');
+        if (!currentState.niche) {
+            showToast('Please describe what you do', true);
+            nicheInput.focus();
+            return false;
+        }
+
+        if (!currentState.audience) {
+            showToast('Please describe who it\'s for', true);
+            audienceInput.focus();
+            return false;
+        }
+
+        return true;
+    }
+
+    // ========================================
+    // GENERATE HANDLER
+    // ========================================
+    async function handleGenerate() {
+        if (!validateInputs()) return;
+
+        // Check daily limit for free users
+        if (!isPro() && getRemainingFreeUses() <= 0) {
+            showPaywall('limit-reached');
+            return;
+        }
+
+        const btnText = generateBtn.querySelector('.btn-text');
+        const btnLoader = generateBtn.querySelector('.btn-loader');
+        btnText.classList.add('hidden');
+        btnLoader.classList.remove('hidden');
+        generateBtn.disabled = true;
+
+        try {
+            const { platform, niche, audience, goal, style, output } = currentState;
+
+            const data = await generateWithAPI(platform, niche, audience, goal, style, output);
+            const results = parseResponse(data.content, output);
+
+            // Increment usage for free users
+            if (!isPro()) {
+                incrementUsage();
+            }
+
+            // Mark first bio complete and show upgrade hint
+            if (isFirstBio()) {
+                markFirstBioComplete();
+                upgradeHint.classList.remove('hidden');
+            }
+
+            renderResults(results);
+
+            setTimeout(() => {
+                resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100);
+
+        } catch (error) {
+            console.error('Generation error:', error);
+            showToast(error.message || 'Failed to generate. Please try again.', true);
+        } finally {
+            btnText.classList.remove('hidden');
+            btnLoader.classList.add('hidden');
+            generateBtn.disabled = false;
+        }
+    }
+
+    // ========================================
+    // EVENT LISTENERS
+    // ========================================
+    generateBtn.addEventListener('click', handleGenerate);
+    copyAllBtn.addEventListener('click', copyAllResults);
+
+    [nicheInput, audienceInput].forEach(input => {
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleGenerate();
+            }
+        });
     });
-    
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 300);
-    }, 2000);
-}
 
-// ========================================
-// VALIDATION
-// ========================================
-function validateInputs() {
-    currentState.niche = nicheInput.value.trim();
-    currentState.audience = audienceInput.value.trim();
-    
-    if (!currentState.niche) {
-        showToast('Please enter your niche', true);
-        nicheInput.focus();
-        return false;
-    }
-    
-    if (!currentState.audience) {
-        showToast('Please enter your audience', true);
-        audienceInput.focus();
-        return false;
-    }
-    
-    return true;
-}
-
-// ========================================
-// GENERATE HANDLER
-// ========================================
-async function handleGenerate() {
-    if (!validateInputs()) return;
-    
-    // Show loading state
-    const btnText = generateBtn.querySelector('.btn-text');
-    const btnLoader = generateBtn.querySelector('.btn-loader');
-    btnText.classList.add('hidden');
-    btnLoader.classList.remove('hidden');
-    generateBtn.disabled = true;
-    
-    // Simulate brief processing (feels more intentional)
-    await new Promise(resolve => setTimeout(resolve, 400));
-    
-    try {
-        const results = generateContent();
-        renderResults(results);
-        
-        // Scroll to results
-        setTimeout(() => {
-            resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
-        
-    } catch (error) {
-        showToast('Something went wrong', true);
-        console.error(error);
-    } finally {
-        btnText.classList.remove('hidden');
-        btnLoader.classList.add('hidden');
-        generateBtn.disabled = false;
-    }
-}
-
-// ========================================
-// EVENT LISTENERS
-// ========================================
-generateBtn.addEventListener('click', handleGenerate);
-copyAllBtn.addEventListener('click', copyAllResults);
-
-// Enter key to generate
-[nicheInput, audienceInput].forEach(input => {
-    input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleGenerate();
+    // PRO badge click - open paywall
+    proBadge.addEventListener('click', () => {
+        if (!isPro()) {
+            showPaywall('default');
         }
     });
-});
 
-// Prevent zoom on double tap for iOS
-document.addEventListener('dblclick', (e) => {
-    e.preventDefault();
-}, { passive: false });
+    // Reminder link click
+    reminderLink.addEventListener('click', () => {
+        showPaywall('default');
+    });
+
+    // Paywall close
+    paywallClose.addEventListener('click', hidePaywall);
+    paywallOverlay.addEventListener('click', (e) => {
+        if (e.target === paywallOverlay) {
+            hidePaywall();
+        }
+    });
+
+    // Paywall CTA - placeholder for actual purchase
+    paywallCta.addEventListener('click', () => {
+        // TODO: Integrate with actual payment system
+        showToast('Payment integration coming soon!');
+    });
+
+    // Escape key to close paywall
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hidePaywall();
+        }
+    });
+
+    // Prevent zoom on double tap for iOS
+    document.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+    }, { passive: false });
+
+    // ========================================
+    // INIT
+    // ========================================
+    function init() {
+        // Update PRO badge if user is PRO
+        if (isPro()) {
+            proBadge.style.background = 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)';
+            proBadge.textContent = '✓ PRO';
+
+            // Remove PRO tags from chips
+            document.querySelectorAll('.pro-tag').forEach(tag => tag.remove());
+            document.querySelectorAll('.chip.pro-feature').forEach(chip => {
+                chip.classList.remove('pro-feature');
+                chip.removeAttribute('data-pro');
+            });
+        }
+    }
+
+    init();
+
+} // End of main page block
