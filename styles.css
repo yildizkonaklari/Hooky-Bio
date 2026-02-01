@@ -123,7 +123,9 @@ body::before {
 }
 
 .logo-icon {
-    font-size: 1.5rem;
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
 }
 
 .logo-text {
