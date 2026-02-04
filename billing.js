@@ -70,7 +70,7 @@ class BillingManager {
 
     // Format price for display
     formatPrice(price) {
-        return new Intl.NumberFormat('tr-TR', {
+        return new Intl.NumberFormat('en-US', {
             style: 'currency',
             currency: price.currency
         }).format(price.value);
@@ -134,7 +134,7 @@ class BillingManager {
             const paymentDetails = {
                 total: {
                     label: 'Hooky Bio PRO',
-                    amount: { currency: 'TRY', value: '0' }
+                    amount: { currency: 'USD', value: '0' }
                 }
             };
 
