@@ -4,8 +4,8 @@
 // ========================================
 
 const PRODUCT_IDS = {
-    monthly: 'pro_monthly',
-    yearly: 'pro_yearly'
+    monthly: 'hookybio_pro_monthly',
+    yearly: 'hookybio_pro_yearly'
 };
 
 class BillingManager {
