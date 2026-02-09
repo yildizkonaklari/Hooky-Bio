@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.hooky.bio",
+      "sha256_cert_fingerprints": [
+        "BC:89:69:D1:9D:C7:CD:63:59:12:70:46:FD:E0:6A:3E:FA:B5:AD:04:82:0C:37:21:E9:93:FA:EA:14:61:9C:0A"
+      ]
+    }
+  }
+]
